@@ -219,25 +219,30 @@ export default function BibleReader() {
     if (!selectedVerse || crossRefs.length > 0) return;
     
     setIsStudying(true);
-    // Simple associative algorithm: Extract main words from verse, search api.
-    const stopWords = ['the','and','to','of','a','i','in','was','that','for','it','with','as','his','on','be','at','by','he','is','not','are','this','but','from','or','have','an','they','which','one','you','were','all','her','she','there','would','their','we','him','been','has','when','who','will','more','no','if','out','so','said','what','up','its','about','into','than','them','can','only','other','new','some','could','time','these','two','may','then','do','first','any','my','now','such','like','our','over','man','me','even','most','made','after','also','did','many','before','must','through','back','years','where','much','your','way','well','down','should','because','each','just','those','people','mr','how','too','little','state','good','very','make','world','still','own','see','men','work','long','get','here','between','both','life','being','under','never','day','same','another','know','while','last','might','us','great','old','year','off','come','since','against','go','came','right','used','take','three'];
     
-    const words = selectedVerse.text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, '')
-      .split(' ')
-      .filter(w => w.length > 3 && !stopWords.includes(w))
-      .slice(0, 3); // Take top 3 strong words
+    const referenceStr = `${selectedVerse.book_name} ${selectedVerse.chapter}:${selectedVerse.verse}`;
+    
+    // Fetch directly from our new cross_references table
+    const { data, error } = await supabase
+      .from('cross_references')
+      .select('target_verse, votes')
+      .eq('source_verse', referenceStr)
+      .order('votes', { ascending: false })
+      .limit(5);
       
-    if (words.length > 0) {
-      try {
-        const query = words.join('+');
-        const res = await fetch(`https://bible-api.com/?search=${query}`);
-        const data = await res.json();
-        const refs = data.verses ? data.verses.filter((v: any) => v.reference !== `${selectedVerse.book_name} ${selectedVerse.chapter}:${selectedVerse.verse}`).slice(0, 5) : [];
-        setCrossRefs(refs);
-      } catch (err) {}
+    if (data && data.length > 0) {
+      // Map them into UI readable format
+      const mappedRefs = data.map(d => ({
+        reference: d.target_verse,
+        text: `View related passage: ${d.target_verse}`,
+        book_name: d.target_verse.split(/ (?=\d+:\d+)/)[0],
+        chapter: parseInt(d.target_verse.split(/ (?=\d+:\d+)/)[1]?.split(':')[0] || '1', 10)
+      }));
+      setCrossRefs(mappedRefs);
+    } else {
+      setCrossRefs([]);
     }
+    
     setIsStudying(false);
   };
 
@@ -245,10 +250,10 @@ export default function BibleReader() {
   const handleNextChapter = () => setSelectedChapter(prev => prev + 1);
 
   return (
-    <div className="w-full flex flex-col md:flex-row pb-24 z-10 px-4 h-full gap-6">
+    <div className="w-full flex flex-col md:flex-row pb-24 z-10 px-4 h-full gap-6 relative">
       
       {/* SCRIPTURE VIEWER */}
-      <div className={`w-full ${selectedVerse ? 'md:w-[60%] hidden md:block' : 'w-full'}`}>
+      <div className={`w-full transition-all duration-300 ${selectedVerse ? 'md:w-[60%] pb-[60vh] md:pb-0' : 'w-full'}`}>
         <div className="sticky top-0 bg-[#050505]/95 backdrop-blur-xl z-20 py-4 border-b border-zinc-900/50 flex flex-col items-center gap-3">
           
           <div className="flex w-full items-center justify-between gap-2 max-w-lg flex-wrap md:flex-nowrap">
@@ -316,59 +321,70 @@ export default function BibleReader() {
         </div>
       </div>
 
-      {/* SIDE PANEL (STUDY BIBLE) */}
+      {/* MOBILE BOTTOM DRAWER & DESKTOP SIDE PANEL */}
       {selectedVerse && (
-        <div className="fixed md:sticky top-0 md:top-24 left-0 w-full md:w-[40%] h-[100dvh] md:h-[calc(100vh-100px)] bg-zinc-950 md:bg-zinc-900/20 border-none md:border border-zinc-900 z-40 flex flex-col md:rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md">
+        <>
+          {/* Overlay to dim background slightly on mobile when drawer is up */}
+          <div className="fixed inset-0 bg-black/40 z-30 md:hidden" onClick={() => setSelectedVerse(null)} />
           
-          <div className="bg-zinc-900/80 p-4 border-b border-zinc-800 flex justify-between items-start">
-            <div>
-              <h3 className="text-lg font-serif text-blue-300">
-                {selectedVerse.book_name} {selectedVerse.chapter}:{selectedVerse.verse}
-              </h3>
-              <p className="text-xs italic text-zinc-400 mt-1 font-serif line-clamp-2">
-                "{selectedVerse.text.trim()}"
-              </p>
-            </div>
-            <button className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors flex-shrink-0" onClick={() => setSelectedVerse(null)}>✕</button>
-          </div>
-
-          <div className="flex border-b border-zinc-800 bg-zinc-900/40">
-            <button onClick={() => setActiveTab('annotate')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${activeTab === 'annotate' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>My Annotations</button>
-            <button onClick={() => setActiveTab('community')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${activeTab === 'community' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Community ({communityNotes.length})</button>
-            <button onClick={fetchStudyContext} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${activeTab === 'study' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Study</button>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-zinc-950/50">
+          <div className="fixed bottom-0 left-0 w-full h-[60dvh] bg-zinc-950 md:sticky md:top-24 md:w-[40%] md:h-[calc(100vh-100px)] md:bg-zinc-900/20 md:border md:rounded-2xl border-t border-zinc-900 z-40 flex flex-col shadow-2xl backdrop-blur-3xl overflow-hidden rounded-t-3xl">
             
-            {/* ANNOTATE TAB */}
-            {activeTab === 'annotate' && (
-              <form onSubmit={saveAnnotation} className="flex flex-col h-full">
-                <div className="mb-6">
-                  <label className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-3 block">Highlight Color</label>
-                  <div className="flex gap-3">
-                    {HIGHLIGHT_COLORS.map(c => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setNoteColor(c.id)}
-                        style={{ backgroundColor: c.id === 'none' ? '#18181b' : c.hex.replace('0.3', '1') }}
-                        className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${noteColor === c.id ? 'border-white scale-110' : 'border-zinc-700'}`}
-                        title={c.label}
-                      />
-                    ))}
-                  </div>
-                </div>
+            <div className="bg-zinc-900/80 p-4 border-b border-zinc-800 flex justify-between items-start pt-6 md:pt-4">
+              {/* Mobile grab handle */}
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-zinc-700 rounded-full md:hidden" />
+              
+              <div>
+                <h3 className="text-lg font-serif text-blue-300">
+                  {selectedVerse.book_name} {selectedVerse.chapter}:{selectedVerse.verse}
+                </h3>
+                <p className="text-xs italic text-zinc-400 mt-1 font-serif line-clamp-2">
+                  "{selectedVerse.text.trim()}"
+                </p>
+              </div>
+              <button className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors flex-shrink-0" onClick={() => setSelectedVerse(null)}>✕</button>
+            </div>
 
-                <div className="flex-1 flex flex-col">
-                  <label className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-2 block">My Notes</label>
-                  <textarea 
-                    placeholder="Reflect on this verse..." 
-                    value={noteContent} 
-                    onChange={(e) => setNoteContent(e.target.value)} 
-                    className="flex-1 w-full bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors resize-none mb-4" 
-                  />
+            <div className="flex border-b border-zinc-800 bg-zinc-900/40 flex-shrink-0">
+              <button onClick={() => setActiveTab('annotate')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'annotate' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>My Annotations</button>
+              <button onClick={() => setActiveTab('community')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'community' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Community ({communityNotes.length})</button>
+              <button onClick={fetchStudyContext} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'study' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Study</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto bg-zinc-950/50 flex flex-col relative pb-safe">
+              
+              {/* ANNOTATE TAB */}
+              {activeTab === 'annotate' && (
+                <form onSubmit={saveAnnotation} className="flex flex-col h-full absolute inset-0">
+                  <div className="p-4 md:p-6 flex-1 overflow-y-auto">
+                    <div className="mb-6">
+                      <label className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-3 block">Highlight Color</label>
+                      <div className="flex gap-3">
+                        {HIGHLIGHT_COLORS.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setNoteColor(c.id)}
+                            style={{ backgroundColor: c.id === 'none' ? '#18181b' : c.hex.replace('0.3', '1') }}
+                            className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${noteColor === c.id ? 'border-white scale-110' : 'border-zinc-700'}`}
+                            title={c.label}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col">
+                      <label className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase mb-2 block">My Notes</label>
+                      <textarea 
+                        placeholder="Reflect on this verse..." 
+                        value={noteContent} 
+                        onChange={(e) => setNoteContent(e.target.value)} 
+                        className="w-full min-h-[100px] bg-zinc-900/80 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors resize-none mb-4" 
+                      />
+                    </div>
+                  </div>
                   
-                  <div className="flex items-center justify-between mt-auto pt-4 border-t border-zinc-900">
+                  {/* Explicitly pinned footer for Save Button */}
+                  <div className="bg-zinc-900 border-t border-zinc-800 p-4 flex items-center justify-between sticky bottom-0 z-10 w-full mb-[50px] md:mb-0">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input 
                         type="checkbox" 
@@ -381,62 +397,62 @@ export default function BibleReader() {
                     <button 
                       type="submit" 
                       disabled={isSubmitting} 
-                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-8 py-2.5 rounded-lg transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
                     >
                       {isSubmitting ? 'Saving...' : 'Save'}
                     </button>
                   </div>
-                </div>
-              </form>
-            )}
+                </form>
+              )}
 
-            {/* COMMUNITY TAB */}
-            {activeTab === 'community' && (
-              <div className="space-y-4">
-                {communityNotes.length === 0 ? (
-                  <p className="text-xs text-zinc-600 italic text-center py-10 mt-10">No public or friend notes for this verse.</p>
-                ) : (
-                  communityNotes.map(note => {
-                    const isFriend = friendUsernames.includes(note.user_name);
-                    return (
-                      <div key={note.id} className={`p-4 rounded-xl border ${isFriend ? 'bg-blue-900/10 border-blue-500/20' : 'bg-zinc-900/40 border-zinc-800/50'}`}>
-                        <div className="flex justify-between items-start mb-2">
-                          <p className={`text-xs font-bold ${isFriend ? 'text-blue-400' : 'text-zinc-300'}`}>
-                            {note.user_name} {isFriend && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded ml-1 uppercase">Friend</span>}
-                          </p>
-                          <p className="text-[9px] text-zinc-600">{new Date(note.created_at).toLocaleDateString()}</p>
+              {/* COMMUNITY TAB */}
+              {activeTab === 'community' && (
+                <div className="space-y-4 p-4 md:p-6 pb-20">
+                  {communityNotes.length === 0 ? (
+                    <p className="text-xs text-zinc-600 italic text-center py-10 mt-10">No public or friend notes for this verse.</p>
+                  ) : (
+                    communityNotes.map(note => {
+                      const isFriend = friendUsernames.includes(note.user_name);
+                      return (
+                        <div key={note.id} className={`p-4 rounded-xl border ${isFriend ? 'bg-blue-900/10 border-blue-500/20' : 'bg-zinc-900/40 border-zinc-800/50'}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <p className={`text-xs font-bold ${isFriend ? 'text-blue-400' : 'text-zinc-300'}`}>
+                              {note.user_name} {isFriend && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded ml-1 uppercase">Friend</span>}
+                            </p>
+                            <p className="text-[9px] text-zinc-600">{new Date(note.created_at).toLocaleDateString()}</p>
+                          </div>
+                          <p className="text-sm text-zinc-300 font-light leading-relaxed">{note.content || <span className="italic text-zinc-600">Highlighted only.</span>}</p>
                         </div>
-                        <p className="text-sm text-zinc-300 font-light leading-relaxed">{note.content || <span className="italic text-zinc-600">Highlighted only.</span>}</p>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
+                      );
+                    })
+                  )}
+                </div>
+              )}
 
-            {/* STUDY TAB */}
-            {activeTab === 'study' && (
-              <div className="space-y-4">
-                <p className="text-xs text-zinc-500 mb-4 bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
-                  <strong className="text-zinc-300 tracking-widest uppercase text-[10px] block mb-1">Cross-References</strong>
-                  Topical context structurally related to this scripture.
-                </p>
-                {isStudying ? (
-                  <div className="flex justify-center py-10"><div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"/></div>
-                ) : crossRefs.length === 0 ? (
-                  <p className="text-xs text-zinc-600 italic text-center py-5">No strong thematic cross-references found.</p>
-                ) : (
-                  crossRefs.map((ref, idx) => (
-                    <div key={idx} className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/40 transition-colors cursor-pointer" onClick={() => { setSelectedBook(ref.book_name); setSelectedChapter(ref.chapter); }}>
-                      <p className="text-[10px] font-bold text-orange-400 mb-1">{ref.reference}</p>
-                      <p className="text-xs text-zinc-400 font-serif italic line-clamp-3">"{ref.text.trim()}"</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+              {/* STUDY TAB */}
+              {activeTab === 'study' && (
+                <div className="space-y-4 p-4 md:p-6 pb-20">
+                  <p className="text-xs text-zinc-500 mb-4 bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
+                    <strong className="text-zinc-300 tracking-widest uppercase text-[10px] block mb-1">Treasury Cross-References</strong>
+                    Verses related structurally and topically to this passage.
+                  </p>
+                  {isStudying ? (
+                    <div className="flex justify-center py-10"><div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"/></div>
+                  ) : crossRefs.length === 0 ? (
+                    <p className="text-xs text-zinc-600 italic text-center py-5">No cross-references found for this verse.</p>
+                  ) : (
+                    crossRefs.map((ref, idx) => (
+                      <div key={idx} className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/40 transition-colors cursor-pointer" onClick={() => { setSelectedBook(ref.book_name); setSelectedChapter(ref.chapter); }}>
+                        <p className="text-[10px] font-bold text-orange-400 mb-1">{ref.reference}</p>
+                        <p className="text-xs text-zinc-400 font-serif italic line-clamp-3">"{ref.text.trim()}"</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
