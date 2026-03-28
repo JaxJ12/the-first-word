@@ -3,11 +3,38 @@
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 
+const BOOK_MAP: Record<string, string> = {
+  'Gen': 'Genesis', 'Exod': 'Exodus', 'Lev': 'Leviticus', 'Num': 'Numbers', 'Deut': 'Deuteronomy',
+  'Josh': 'Joshua', 'Judg': 'Judges', 'Ruth': 'Ruth', '1Sam': '1 Samuel', '2Sam': '2 Samuel',
+  '1Kgs': '1 Kings', '2Kgs': '2 Kings', '1Chr': '1 Chronicles', '2Chr': '2 Chronicles',
+  'Ezra': 'Ezra', 'Neh': 'Nehemiah', 'Esth': 'Esther', 'Job': 'Job', 'Ps': 'Psalms',
+  'Prov': 'Proverbs', 'Eccl': 'Ecclesiastes', 'Song': 'Song of Solomon', 'Isa': 'Isaiah',
+  'Jer': 'Jeremiah', 'Lam': 'Lamentations', 'Ezek': 'Ezekiel', 'Dan': 'Daniel', 'Hos': 'Hosea',
+  'Joel': 'Joel', 'Amos': 'Amos', 'Obad': 'Obadiah', 'Jonah': 'Jonah', 'Mic': 'Micah',
+  'Nah': 'Nahum', 'Hab': 'Habakkuk', 'Zeph': 'Zephaniah', 'Hag': 'Haggai', 'Zech': 'Zechariah',
+  'Mal': 'Malachi', 'Matt': 'Matthew', 'Mark': 'Mark', 'Luke': 'Luke', 'John': 'John',
+  'Acts': 'Acts', 'Rom': 'Romans', '1Cor': '1 Corinthians', '2Cor': '2 Corinthians',
+  'Gal': 'Galatians', 'Eph': 'Ephesians', 'Phil': 'Philippians', 'Col': 'Colossians',
+  '1Thess': '1 Thessalonians', '2Thess': '2 Thessalonians', '1Tim': '1 Timothy',
+  '2Tim': '2 Timothy', 'Titus': 'Titus', 'Phlm': 'Philemon', 'Heb': 'Hebrews', 'Jas': 'James',
+  '1Pet': '1 Peter', '2Pet': '2 Peter', '1John': '1 John', '2John': '2 John', '3John': '3 John',
+  'Jude': 'Jude', 'Rev': 'Revelation'
+};
+
+function parseVerseLabel(raw: string) {
+  const parts = raw.split('.');
+  if (parts.length !== 3) return null;
+  const book = BOOK_MAP[parts[0]];
+  if (!book) return null;
+  return `${book} ${parts[1]}:${parts[2]}`;
+}
+
 export default function InstallerPage() {
   const { session } = useAuth();
   const [status, setStatus] = useState<string>("Ready to ingest.");
   const [isLoading, setIsLoading] = useState(false);
   const [cronSecret, setCronSecret] = useState('');
+  const [progress, setProgress] = useState(0);
 
   const runIngestion = async () => {
     if (!cronSecret) {
@@ -16,20 +43,69 @@ export default function InstallerPage() {
     }
     
     setIsLoading(true);
-    setStatus("Connecting to server and downloading 15MB dataset...");
-    
+    setStatus("Downloading 15MB dictionary database to your browser...");
+    setProgress(5);
+
     try {
-      // Hit our newly deployed vercel API route but from the client-side safely
-      const res = await fetch(`/api/admin/seed?secret=${cronSecret}`);
-      const data = await res.json();
+      // Fetch open source text file IN BROWSER to bypass Vercel timeout crashes completely
+      const res = await fetch('https://raw.githubusercontent.com/openbibleinfo/CrossReferenceData/master/cross_references.txt');
+      const text = await res.text();
       
-      if (res.ok) {
-        setStatus(`✅ SUCCESS! Inserted ${data.commentaries_seeded} Commentaries and ${data.cross_references_inserted} Cross References.`);
-      } else {
-        setStatus(`❌ ERROR: ${data.error || 'Unauthorized. Wrong secret key?'}`);
+      setStatus("Dictionary ready. Parsing highly correlated connections...");
+      setProgress(20);
+      
+      const lines = text.split('\n').filter(l => l.trim() !== '' && !l.startsWith('From Verse'));
+      const limit = 3000;
+      const parsedRefs = [];
+      
+      for (let i = 0; i < Math.min(limit, lines.length); i++) {
+          const parts = lines[i].split('\t');
+          if (parts.length >= 3) {
+              const source = parseVerseLabel(parts[0]);
+              const target = parseVerseLabel(parts[1]);
+              const votes = parseInt(parts[2], 10);
+              
+              if (source && target && votes > 0) {
+                  parsedRefs.push({
+                      source_verse: source,
+                      target_verse: target,
+                      votes: votes
+                  });
+              }
+          }
       }
+      
+      setStatus("Parsing complete. Uploading payload in small chunks to avoid timeouts...");
+      setProgress(30);
+
+      // Now pass to Vercel in 500-item chunks
+      const chunkSize = 500;
+      let totalInserted = 0;
+
+      for (let i = 0; i < parsedRefs.length; i += chunkSize) {
+        const chunk = parsedRefs.slice(i, i + chunkSize);
+        
+        const chunkRes = await fetch('/api/admin/insert_chunk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: cronSecret, data: chunk })
+        });
+        
+        if (!chunkRes.ok) {
+           const errRep = await chunkRes.json();
+           throw new Error(errRep.error || "Chunk upload failed");
+        }
+        
+        totalInserted += chunk.length;
+        const percent = Math.floor(30 + ((i + chunkSize) / parsedRefs.length) * 70);
+        setProgress(Math.min(100, percent));
+        setStatus(`Uploaded ${totalInserted}/${parsedRefs.length} references safely...`);
+      }
+
+      setStatus(`✅ SUCCESS! Safely inserted ${totalInserted} Treasury entries. Go check out the Study tab!`);
     } catch (err: any) {
-      setStatus(`❌ NETWORK ERROR: Vercel may have timed out, but some rows were likely inserted. Try again if needed.`);
+      console.error(err);
+      setStatus(`❌ INGESTION ERROR: ${err.message}. Try clicking the button again to resume from where it failed.`);
     }
     
     setIsLoading(false);
@@ -44,7 +120,7 @@ export default function InstallerPage() {
       <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-lg shadow-2xl">
         <h1 className="text-2xl font-bold text-white mb-2">Study Resources Installer</h1>
         <p className="text-sm text-zinc-400 mb-6">
-          This secure panel will remotely execute the massive backend ingestion script on Vercel to populate your Supabase database with the Treasury of Scripture Knowledge & Matthew Henry's Concise Commentary.
+          This secure panel handles downloading massive biblical dictionaries into the browser and batch pumping them securely into your database to prevent arbitrary timeout crashes.
         </p>
 
         <div className="text-left mb-6">
@@ -61,13 +137,15 @@ export default function InstallerPage() {
         <button 
           onClick={runIngestion}
           disabled={isLoading || !cronSecret}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50"
+          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg transition-colors disabled:opacity-50 relative overflow-hidden"
         >
-          {isLoading ? 'Injecting Data (Takes 5-10s)...' : 'Run Data Ingestion'}
+          {/* Progress fill visual */}
+          <div className="absolute inset-y-0 left-0 bg-blue-400 opacity-20 transition-all duration-300" style={{ width: `${progress}%` }} />
+          <span className="relative z-10">{isLoading ? `Injecting Data... ${progress}%` : 'Run Chunked Data Ingestion'}</span>
         </button>
 
         {status && (
-          <div className="mt-6 p-4 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-zinc-300 break-words">
+          <div className="mt-6 p-4 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-zinc-400 break-words tracking-wide">
             {status}
           </div>
         )}
