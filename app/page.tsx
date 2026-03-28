@@ -1,51 +1,69 @@
 import { supabase } from '@/lib/supabase'
 
 export default async function Home() {
-  // 1. Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split('T')[0]
 
-  // 2. Fetch today's verse from your Supabase table
   const { data: devotional, error } = await supabase
     .from('devotionals')
     .select('*')
     .eq('publish_date', today)
     .single()
 
-  if (error || !devotional) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-black text-white p-6">
-        <p className="text-zinc-500 italic">No word for today yet. Check back at sunrise.</p>
-      </main>
-    )
-  }
+  // If no verse for today, grab the most recent one instead of showing an error
+  const displayData = devotional || (await supabase
+    .from('devotionals')
+    .select('*')
+    .order('publish_date', { ascending: false })
+    .limit(1)
+    .single()).data
+
+  if (!displayData) return <div className="bg-black min-h-screen" />
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center bg-black px-8 py-12 text-white">
-      {/* Background Glow (Optional Styling) */}
-      <div className="absolute top-1/4 h-64 w-64 rounded-full bg-blue-500/10 blur-[100px]" />
+    <main className="relative flex min-h-[100dvh] flex-col items-center justify-between bg-[#050505] px-8 py-20 text-white overflow-hidden">
+      {/* Background Aesthetic Glows */}
+      <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-blue-600/20 blur-[100px]" />
+      <div className="absolute -bottom-20 -right-20 h-64 w-64 rounded-full bg-indigo-600/10 blur-[100px]" />
 
-      <div className="z-10 w-full max-w-md space-y-12 text-center">
-        {/* The Date */}
-        <p className="text-sm font-medium tracking-[0.2em] text-zinc-500 uppercase">
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-        </p>
+      <div className="z-10 w-full max-w-md flex flex-col items-center space-y-12 text-center">
+        {/* Date Header */}
+        <header className="space-y-2">
+          <p className="text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long' })}
+          </p>
+          <p className="text-2xl font-light text-zinc-200">
+            {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+          </p>
+        </header>
 
-        {/* The Verse */}
-        <div className="space-y-6">
-          <h1 className="text-3xl font-light leading-tight tracking-tight sm:text-4xl italic">
-            "{devotional.verse_text}"
+        {/* The Verse Card */}
+        <section className="py-10 px-4">
+          <h1 className="text-3xl font-serif leading-snug tracking-tight italic text-zinc-100 sm:text-4xl">
+            "{displayData.verse_text}"
           </h1>
-          <p className="text-lg font-medium text-blue-400">
-            {devotional.reference}
-          </p>
-        </div>
+          <div className="mt-8 flex items-center justify-center space-x-4">
+            <div className="h-[1px] w-8 bg-blue-500/50" />
+            <p className="text-sm font-medium tracking-widest text-blue-400 uppercase">
+              {displayData.reference}
+            </p>
+            <div className="h-[1px] w-8 bg-blue-500/50" />
+          </div>
+        </section>
 
-        {/* The Prompt */}
-        <div className="pt-8 border-t border-zinc-800">
-          <p className="text-zinc-400 font-light">
-            {devotional.reflection_prompt}
+        {/* Reflection Section */}
+        <footer className="w-full max-w-[280px] pt-10">
+          <p className="text-xs font-semibold tracking-widest text-zinc-600 uppercase mb-4">Reflection</p>
+          <p className="text-sm leading-relaxed text-zinc-400 font-light italic">
+            {displayData.reflection_prompt}
           </p>
-        </div>
+        </footer>
+      </div>
+
+      {/* App Branding */}
+      <div className="z-10 pb-4">
+        <p className="text-[10px] tracking-[0.5em] text-zinc-700 uppercase font-black">
+          The First Word
+        </p>
       </div>
     </main>
   )
