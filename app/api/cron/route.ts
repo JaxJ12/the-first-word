@@ -13,14 +13,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const bibleRes = await fetch('https://bible-api.com/random?translation=kjv');
-    const bibleData = await bibleRes.json();
+    // 1. Fetch from the more stable API
+    const bibleRes = await fetch('https://labs.bible.org/api/?passage=random&type=json');
+    const bibleData = await bibleRes.json(); // This returns an array [ { ... } ]
+    const verse = bibleData[0];
 
+    // 2. Insert into Supabase
     const { error } = await supabase
       .from('devotionals')
       .insert({
-        verse_text: bibleData.text,
-        reference: bibleData.reference,
+        verse_text: verse.text,
+        reference: `${verse.bookname} ${verse.chapter}:${verse.verse}`,
         reflection_prompt: "How does this verse speak to your heart today?",
         publish_date: new Date().toISOString().split('T')[0]
       });
