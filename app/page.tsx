@@ -25,6 +25,8 @@ export default function Home() {
   const [friendUsernames, setFriendUsernames] = useState<string[]>([])
   const [newFriendName, setNewFriendName] = useState('')
   const [isAddingFriend, setIsAddingFriend] = useState(false)
+  // Timing States
+  const [reminderTime, setReminderTime] = useState('08:00')
 
   // Feed States
   const [devotional, setDevotional] = useState<any>(null)
@@ -57,6 +59,30 @@ export default function Home() {
     setReminderEnabled(localStorage.getItem('firstWordReminder') === 'true')
 
     return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+
+    // ADD THIS PART:
+    const savedTime = localStorage.getItem('firstWordReminderTime') || '08:00'
+    setReminderTime(savedTime)
+
+    const timer = setInterval(() => {
+      const now = new Date()
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+      const isEnabled = localStorage.getItem('firstWordReminder') === 'true'
+      
+      if (isEnabled && currentTime === localStorage.getItem('firstWordReminderTime')) {
+        if (Notification.permission === 'granted') {
+          new Notification("The First Word", {
+            body: "Your daily verse is ready.",
+            icon: "/icon-192x192.png"
+          })
+        }
+      }
+    }, 60000) 
+
+    return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -187,6 +213,11 @@ export default function Home() {
     await supabase.auth.signOut()
     setSession(null)
     setCurrentView('home')
+  }
+
+  function handleTimeChange(newTime: string) {
+    setReminderTime(newTime)
+    localStorage.setItem('firstWordReminderTime', newTime)
   }
 
   // --- FEED LOGIC ---
@@ -355,14 +386,30 @@ export default function Home() {
           {/* App Preferences */}
           <section className="space-y-4">
             <h3 className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase border-b border-zinc-900 pb-2">Preferences</h3>
-            <div className="flex justify-between items-center bg-zinc-900/40 border border-zinc-800/50 rounded-xl p-4">
-              <div>
-                <p className="text-sm text-zinc-300">Daily Reminder</p>
-                <p className="text-[10px] text-zinc-500 mt-1">Get notified when the new verse drops.</p>
+            
+            <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-xl p-5 space-y-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-zinc-300">Daily Reminder</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Get notified when it's time to reflect.</p>
+                </div>
+                <button onClick={toggleReminder} className={`w-12 h-6 rounded-full transition-colors relative ${reminderEnabled ? 'bg-blue-600' : 'bg-zinc-700'}`}>
+                  <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${reminderEnabled ? 'translate-x-6' : ''}`} />
+                </button>
               </div>
-              <button onClick={toggleReminder} className={`w-12 h-6 rounded-full transition-colors relative ${reminderEnabled ? 'bg-blue-600' : 'bg-zinc-700'}`}>
-                <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${reminderEnabled ? 'translate-x-6' : ''}`} />
-              </button>
+          
+              {/* SHOW TIME PICKER ONLY IF ENABLED */}
+              {reminderEnabled && (
+                <div className="pt-4 border-t border-zinc-800 flex justify-between items-center animate-in fade-in slide-in-from-top-2">
+                  <p className="text-xs text-zinc-400">Reminder Time</p>
+                  <input 
+                    type="time" 
+                    value={reminderTime}
+                    onChange={(e) => handleTimeChange(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-blue-400 font-bold focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
             </div>
           </section>
 
