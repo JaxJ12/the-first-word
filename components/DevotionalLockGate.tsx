@@ -90,23 +90,24 @@ export default function DevotionalLockGate() {
   if (!needsToReflect()) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-2xl">
-      <div className="w-full max-w-md flex flex-col items-center space-y-8 animate-in fade-in duration-500">
-        
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-md">The First Word</h1>
-          <p className="text-sm text-zinc-400 font-light">
-            Pause and reflect on today's verse to unlock the app.
-          </p>
-        </div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/90 backdrop-blur-2xl">
+      <div className="min-h-full flex items-center justify-center p-6">
+        <div className="w-full max-w-md flex flex-col items-center space-y-8 animate-in fade-in duration-500 py-12">
+          
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-md">The First Word</h1>
+            <p className="text-sm text-zinc-400 font-light">
+              Pause and reflect on today's verse to unlock the app.
+            </p>
+          </div>
 
-        <div className="w-full pointer-events-none">
-          {devotional ? (
-            <DevotionalCard devotional={devotional} />
-          ) : (
-            <div className="h-40 w-full animate-pulse bg-zinc-900 rounded-3xl" />
-          )}
-        </div>
+          <div className="w-full pointer-events-none">
+            {devotional ? (
+              <DevotionalCard devotional={devotional} />
+            ) : (
+              <div className="h-40 w-full animate-pulse bg-zinc-900 rounded-3xl" />
+            )}
+          </div>
 
         <form onSubmit={handleSubmit} className="w-full space-y-4">
           <textarea
@@ -126,6 +127,7 @@ export default function DevotionalLockGate() {
           </button>
         </form>
 
+        </div>
       </div>
     </div>
   );
