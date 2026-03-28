@@ -77,6 +77,7 @@ export default function BibleReader() {
   // External Data State
   const [communityNotes, setCommunityNotes] = useState<VerseNote[]>([]);
   const [crossRefs, setCrossRefs] = useState<any[]>([]);
+  const [commentaryText, setCommentaryText] = useState<string | null>(null);
   const [isStudying, setIsStudying] = useState(false);
 
   useEffect(() => {
@@ -111,10 +112,8 @@ export default function BibleReader() {
             const verseNum = parseInt(parts[parts.length - 1], 10);
             if (!isNaN(verseNum)) {
               if (note.user_id !== session.user.id) {
-                // Anyone else's note counts towards the indicator if it has content
                 counts[verseNum] = (counts[verseNum] || 0) + 1;
               } else {
-                // My note / highlight
                 if (note.highlight_color && note.highlight_color !== 'none') {
                   highlights[verseNum] = note.highlight_color;
                 }
@@ -147,6 +146,7 @@ export default function BibleReader() {
     setNoteColor("none");
     setCommunityNotes([]);
     setCrossRefs([]);
+    setCommentaryText(null);
     
     const reference = `${verse.book_name} ${verse.chapter}:${verse.verse}`;
     
@@ -201,7 +201,6 @@ export default function BibleReader() {
     }
     
     if (!error) {
-      // Refresh my highlights inline
       setMyHighlights(prev => ({
         ...prev,
         [selectedVerse.verse]: noteColor
@@ -216,31 +215,47 @@ export default function BibleReader() {
 
   const fetchStudyContext = async () => {
     setActiveTab('study');
-    if (!selectedVerse || crossRefs.length > 0) return;
+    if (!selectedVerse || crossRefs.length > 0 || commentaryText) return;
     
     setIsStudying(true);
-    
     const referenceStr = `${selectedVerse.book_name} ${selectedVerse.chapter}:${selectedVerse.verse}`;
     
-    // Fetch directly from our new cross_references table
-    const { data, error } = await supabase
-      .from('cross_references')
-      .select('target_verse, votes')
-      .eq('source_verse', referenceStr)
-      .order('votes', { ascending: false })
-      .limit(5);
+    try {
+      // 1. Fetch cross references
+      const { data: refsData } = await supabase
+        .from('cross_references')
+        .select('target_verse, votes')
+        .eq('source_verse', referenceStr)
+        .order('votes', { ascending: false })
+        .limit(5);
+
+      if (refsData && refsData.length > 0) {
+        const mappedRefs = refsData.map(d => ({
+          reference: d.target_verse,
+          text: `View related passage: ${d.target_verse}`,
+          book_name: d.target_verse.split(/ (?=\d+:\d+)/)[0],
+          chapter: parseInt(d.target_verse.split(/ (?=\d+:\d+)/)[1]?.split(':')[0] || '1', 10)
+        }));
+        setCrossRefs(mappedRefs);
+      } else {
+        setCrossRefs([]);
+      }
+
+      // 2. Fetch theological commentary
+      const { data: commData } = await supabase
+        .from('commentaries')
+        .select('text')
+        .eq('reference', referenceStr)
+        .single();
+        
+      if (commData) {
+        setCommentaryText(commData.text);
+      } else {
+        setCommentaryText(null);
+      }
       
-    if (data && data.length > 0) {
-      // Map them into UI readable format
-      const mappedRefs = data.map(d => ({
-        reference: d.target_verse,
-        text: `View related passage: ${d.target_verse}`,
-        book_name: d.target_verse.split(/ (?=\d+:\d+)/)[0],
-        chapter: parseInt(d.target_verse.split(/ (?=\d+:\d+)/)[1]?.split(':')[0] || '1', 10)
-      }));
-      setCrossRefs(mappedRefs);
-    } else {
-      setCrossRefs([]);
+    } catch (err) {
+      console.error(err);
     }
     
     setIsStudying(false);
@@ -324,15 +339,12 @@ export default function BibleReader() {
       {/* MOBILE BOTTOM DRAWER & DESKTOP SIDE PANEL */}
       {selectedVerse && (
         <>
-          {/* Overlay to dim background slightly on mobile when drawer is up */}
           <div className="fixed inset-0 bg-black/40 z-30 md:hidden" onClick={() => setSelectedVerse(null)} />
           
           <div className="fixed bottom-0 left-0 w-full h-[60dvh] bg-zinc-950 md:sticky md:top-24 md:w-[40%] md:h-[calc(100vh-100px)] md:bg-zinc-900/20 md:border md:rounded-2xl border-t border-zinc-900 z-40 flex flex-col shadow-2xl backdrop-blur-3xl overflow-hidden rounded-t-3xl">
             
-            <div className="bg-zinc-900/80 p-4 border-b border-zinc-800 flex justify-between items-start pt-6 md:pt-4">
-              {/* Mobile grab handle */}
+            <div className="bg-zinc-900/80 p-4 border-b border-zinc-800 flex justify-between items-start pt-6 md:pt-4 flex-shrink-0">
               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-zinc-700 rounded-full md:hidden" />
-              
               <div>
                 <h3 className="text-lg font-serif text-blue-300">
                   {selectedVerse.book_name} {selectedVerse.chapter}:{selectedVerse.verse}
@@ -347,7 +359,7 @@ export default function BibleReader() {
             <div className="flex border-b border-zinc-800 bg-zinc-900/40 flex-shrink-0">
               <button onClick={() => setActiveTab('annotate')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'annotate' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>My Annotations</button>
               <button onClick={() => setActiveTab('community')} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'community' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Community ({communityNotes.length})</button>
-              <button onClick={fetchStudyContext} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'study' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Study</button>
+              <button onClick={fetchStudyContext} className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-wider transition-colors ${activeTab === 'study' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Study context</button>
             </div>
             
             <div className="flex-1 overflow-y-auto bg-zinc-950/50 flex flex-col relative pb-safe">
@@ -383,7 +395,6 @@ export default function BibleReader() {
                     </div>
                   </div>
                   
-                  {/* Explicitly pinned footer for Save Button */}
                   <div className="bg-zinc-900 border-t border-zinc-800 p-4 flex items-center justify-between sticky bottom-0 z-10 w-full mb-[50px] md:mb-0">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input 
@@ -431,22 +442,51 @@ export default function BibleReader() {
 
               {/* STUDY TAB */}
               {activeTab === 'study' && (
-                <div className="space-y-4 p-4 md:p-6 pb-20">
-                  <p className="text-xs text-zinc-500 mb-4 bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
-                    <strong className="text-zinc-300 tracking-widest uppercase text-[10px] block mb-1">Treasury Cross-References</strong>
-                    Verses related structurally and topically to this passage.
-                  </p>
+                <div className="p-4 md:p-6 pb-20 space-y-8">
                   {isStudying ? (
                     <div className="flex justify-center py-10"><div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"/></div>
-                  ) : crossRefs.length === 0 ? (
-                    <p className="text-xs text-zinc-600 italic text-center py-5">No cross-references found for this verse.</p>
                   ) : (
-                    crossRefs.map((ref, idx) => (
-                      <div key={idx} className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/40 transition-colors cursor-pointer" onClick={() => { setSelectedBook(ref.book_name); setSelectedChapter(ref.chapter); }}>
-                        <p className="text-[10px] font-bold text-orange-400 mb-1">{ref.reference}</p>
-                        <p className="text-xs text-zinc-400 font-serif italic line-clamp-3">"{ref.text.trim()}"</p>
+                    <>
+                      {/* COMMENTARY SECTION */}
+                      <div>
+                        <h4 className="flex items-center gap-2 text-xs font-bold text-blue-400 uppercase tracking-widest mb-3">
+                          <span className="w-4 h-4 bg-blue-500/20 rounded-full flex items-center justify-center text-[10px]">C</span>
+                          Historical Commentary
+                        </h4>
+                        {commentaryText ? (
+                          <div className="bg-blue-950/20 p-4 rounded-xl border border-blue-900/30">
+                            <p className="text-[13px] text-zinc-300 font-serif leading-relaxed">
+                              {/* Splitting fake markdown bold prefixes just to make it readable */}
+                              {commentaryText.replace("Matthew Henry's Concise Commentary:", '').trim()}
+                            </p>
+                            <p className="text-[9px] text-zinc-500 mt-3 text-right">- Matthew Henry's Concise</p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-500 italic">No formal theological commentary available for this passage in your database.</p>
+                        )}
                       </div>
-                    ))
+
+                      {/* CROSS REFERENCES SECTION */}
+                      <div>
+                        <h4 className="flex items-center gap-2 text-xs font-bold text-orange-400 uppercase tracking-widest mb-3 border-t border-zinc-900 pt-8">
+                          <span className="w-4 h-4 bg-orange-500/20 rounded-full flex items-center justify-center text-[10px]">T</span>
+                          Treasury Scriptural Context
+                        </h4>
+                        
+                        {crossRefs.length === 0 ? (
+                          <p className="text-xs text-zinc-500 italic">No direct context verses found in the treasury database.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {crossRefs.map((ref, idx) => (
+                              <div key={idx} className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800/50 hover:bg-zinc-800/40 transition-colors cursor-pointer" onClick={() => { setSelectedBook(ref.book_name); setSelectedChapter(ref.chapter); }}>
+                                <p className="text-[10px] font-bold text-orange-400 mb-1">{ref.reference}</p>
+                                <p className="text-xs text-zinc-400 font-serif italic line-clamp-2">"{ref.text.trim()}"</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
