@@ -3,42 +3,58 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Home() {
+  // Navigation State
+  const [currentView, setCurrentView] = useState<'home' | 'profile'>('home')
+
+  // Auth States
   const [session, setSession] = useState<any>(null)
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [username, setUsername] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
+  
+  // Profile States
   const [userProfile, setUserProfile] = useState<any>(null)
+  const [editUsername, setEditUsername] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
+  const [reminderEnabled, setReminderEnabled] = useState(false)
 
+  // Social States
   const [activeTab, setActiveTab] = useState<'community' | 'friends'>('community')
   const [friendUsernames, setFriendUsernames] = useState<string[]>([])
   const [newFriendName, setNewFriendName] = useState('')
   const [isAddingFriend, setIsAddingFriend] = useState(false)
 
+  // Feed States
   const [devotional, setDevotional] = useState<any>(null)
   const [reflections, setReflections] = useState<any[]>([])
   const [comment, setComment] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [replyTo, setReplyTo] = useState<{ id: any; name: string } | null>(null)
   const [likedItems, setLikedItems] = useState<Set<any>>(new Set())
-  
-  // NEW: State to hold everyone's streak numbers
   const [streaks, setStreaks] = useState<Record<string, number>>({})
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session) fetchUserProfile(session.user.id)
+      if (session) {
+        setEditEmail(session.user.email)
+        fetchUserProfile(session.user.id)
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      if (session) fetchUserProfile(session.user.id)
+      if (session) {
+        setEditEmail(session.user.email)
+        fetchUserProfile(session.user.id)
+      }
     })
 
     const savedLikes = JSON.parse(localStorage.getItem('firstWordLikes') || '[]')
     setLikedItems(new Set(savedLikes))
+    setReminderEnabled(localStorage.getItem('firstWordReminder') === 'true')
 
     return () => subscription.unsubscribe()
   }, [])
@@ -49,7 +65,10 @@ export default function Home() {
 
   async function fetchUserProfile(userId: string) {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setUserProfile(profile)
+    if (profile) {
+      setUserProfile(profile)
+      setEditUsername(profile.username)
+    }
 
     const { data: friendships } = await supabase.from('friendships').select('friend_id').eq('user_id', userId)
     if (friendships && friendships.length > 0) {
@@ -59,6 +78,45 @@ export default function Home() {
     }
   }
 
+  // --- SETTINGS LOGIC ---
+  async function handleUpdateProfile(e: React.FormEvent) {
+    e.preventDefault()
+    setIsUpdatingProfile(true)
+
+    // Update Username
+    if (editUsername !== userProfile.username) {
+      const { error } = await supabase.from('profiles').update({ username: editUsername }).eq('id', session.user.id)
+      if (!error) {
+        setUserProfile({ ...userProfile, username: editUsername })
+        alert("Username updated!")
+      } else {
+        alert("That username might be taken.")
+      }
+    }
+
+    // Update Email
+    if (editEmail !== session.user.email) {
+      const { error } = await supabase.auth.updateUser({ email: editEmail })
+      if (!error) alert("Email update link sent! Please check your new email's inbox.")
+      else alert(error.message)
+    }
+
+    setIsUpdatingProfile(false)
+  }
+
+  function toggleReminder() {
+    const newState = !reminderEnabled
+    setReminderEnabled(newState)
+    localStorage.setItem('firstWordReminder', newState.toString())
+    
+    if (newState && 'Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') alert("Daily reminders enabled!")
+      })
+    }
+  }
+
+  // --- FRIEND LOGIC ---
   async function handleAddFriend(e: React.FormEvent) {
     e.preventDefault()
     if (!newFriendName || !userProfile || !session) return
@@ -67,7 +125,7 @@ export default function Home() {
     const { data: friendProfile } = await supabase.from('profiles').select('id, username').ilike('username', newFriendName).single()
 
     if (!friendProfile) {
-      alert("User not found! Double check the spelling.")
+      alert("User not found!")
       setIsAddingFriend(false)
       return
     }
@@ -83,21 +141,20 @@ export default function Home() {
     if (!error) {
       setFriendUsernames(prev => [...prev, friendProfile.username])
       setNewFriendName('')
-      alert(`Added ${friendProfile.username} to your friends list!`)
     } else {
-      alert("You are already friends with this user!")
+      alert("Already friends!")
     }
     setIsAddingFriend(false)
   }
 
+  // --- AUTH LOGIC ---
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault()
     setAuthLoading(true)
     if (isSignUp) {
       const { data, error } = await supabase.auth.signUp({ email, password })
       if (error) alert(error.message)
-      // Initialize their profile with a 0 streak
-      else if (data.user) await supabase.from('profiles').insert({ id: data.user.id, username, streak_count: 0 })
+      else if (data.user) await supabase.from('profiles').insert({ id: data.user.id, username: editUsername, streak_count: 0 })
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) alert(error.message)
@@ -108,8 +165,10 @@ export default function Home() {
   async function handleLogout() {
     await supabase.auth.signOut()
     setSession(null)
+    setCurrentView('home')
   }
 
+  // --- FEED LOGIC ---
   async function fetchData() {
     const today = new Date().toISOString().split('T')[0]
     const { data: dev } = await supabase.from('devotionals').select('*').eq('publish_date', today).single()
@@ -120,8 +179,6 @@ export default function Home() {
       const { data: refs } = await supabase.from('reflections').select('*').eq('devotional_date', displayData.publish_date).order('created_at', { ascending: true })
       if (refs) {
         setReflections(refs)
-        
-        // NEW: Fetch streaks for everyone who commented
         const uniqueUsernames = [...new Set(refs.map(r => r.user_name))]
         if (uniqueUsernames.length > 0) {
           const { data: profiles } = await supabase.from('profiles').select('username, streak_count').in('username', uniqueUsernames)
@@ -151,7 +208,6 @@ export default function Home() {
     if (!comment || !devotional || !userProfile) return
     setIsSubmitting(true)
 
-    // --- NEW: THE STREAK MATH ---
     const todayStr = new Date().toISOString().split('T')[0]
     let newStreak = userProfile.streak_count || 0
 
@@ -160,23 +216,13 @@ export default function Home() {
       yesterdayDate.setDate(yesterdayDate.getDate() - 1)
       const yesterdayStr = yesterdayDate.toISOString().split('T')[0]
 
-      if (userProfile.last_post_date === yesterdayStr) {
-        newStreak += 1 // Kept the streak alive
-      } else {
-        newStreak = 1 // Streak broken, restart at 1
-      }
+      if (userProfile.last_post_date === yesterdayStr) newStreak += 1
+      else newStreak = 1
 
-      // Update the database invisibly
-      await supabase.from('profiles').update({
-        streak_count: newStreak,
-        last_post_date: todayStr
-      }).eq('id', session.user.id)
-
-      // Update local state instantly
+      await supabase.from('profiles').update({ streak_count: newStreak, last_post_date: todayStr }).eq('id', session.user.id)
       setUserProfile({ ...userProfile, streak_count: newStreak, last_post_date: todayStr })
     }
 
-    // Insert the actual comment
     const { error } = await supabase.from('reflections').insert({
       devotional_date: devotional.publish_date,
       user_name: userProfile.username,
@@ -187,7 +233,7 @@ export default function Home() {
     if (!error) {
       setComment('')
       setReplyTo(null)
-      fetchData() // Refresh the feed (and the streaks)
+      fetchData()
     }
     setIsSubmitting(false)
   }
@@ -197,6 +243,7 @@ export default function Home() {
     ? topLevelReflections 
     : topLevelReflections.filter(ref => friendUsernames.includes(ref.user_name) || ref.user_name === userProfile?.username)
 
+  // --- UI: LOGIN SCREEN ---
   if (!session) {
     return (
       <main className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#050505] px-8 text-white">
@@ -207,34 +254,100 @@ export default function Home() {
             <p className="text-sm text-zinc-500 mt-2 tracking-widest uppercase">Community Login</p>
           </div>
           <form onSubmit={handleAuth} className="space-y-4">
-            {isSignUp && <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />}
+            {isSignUp && <input type="text" placeholder="Username" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} required className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />}
             <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
             <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
-            <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm py-3 rounded-lg transition-colors mt-4">
-              {authLoading ? '...' : (isSignUp ? 'Create Account' : 'Sign In')}
-            </button>
+            <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm py-3 rounded-lg transition-colors mt-4">{authLoading ? '...' : (isSignUp ? 'Create Account' : 'Sign In')}</button>
           </form>
-          <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-zinc-500 hover:text-white transition-colors">
-            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-          </button>
+          <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-zinc-500 hover:text-white transition-colors">{isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}</button>
         </div>
       </main>
     )
   }
 
+  // --- UI: PROFILE & SETTINGS VIEW ---
+  if (currentView === 'profile') {
+    return (
+      <main className="min-h-[100dvh] bg-[#050505] text-white px-6 py-12 font-sans pb-40">
+        <div className="flex justify-between items-center mb-10">
+          <h1 className="text-xl font-serif italic text-zinc-100">Profile & Settings</h1>
+          <button onClick={() => setCurrentView('home')} className="text-xs font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300">Close</button>
+        </div>
+
+        <div className="space-y-10 max-w-md mx-auto">
+          {/* Account Settings */}
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase border-b border-zinc-900 pb-2">Account Details</h3>
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <div>
+                <label className="text-xs text-zinc-500 block mb-1">Username</label>
+                <input type="text" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 block mb-1">Email</label>
+                <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500" />
+              </div>
+              <button type="submit" disabled={isUpdatingProfile} className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs py-3 rounded-lg transition-colors">{isUpdatingProfile ? 'Updating...' : 'Save Changes'}</button>
+            </form>
+          </section>
+
+          {/* Friends List & Adder */}
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase border-b border-zinc-900 pb-2">Your Circle</h3>
+            <form onSubmit={handleAddFriend} className="flex space-x-2">
+              <input type="text" placeholder="Add friend by username..." value={newFriendName} onChange={(e) => setNewFriendName(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
+              <button type="submit" disabled={isAddingFriend} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors">{isAddingFriend ? '...' : 'Add'}</button>
+            </form>
+            <div className="bg-zinc-900/40 rounded-xl border border-zinc-800/50 p-4 space-y-3">
+              {friendUsernames.length === 0 ? (
+                <p className="text-xs text-zinc-600 italic">No friends added yet.</p>
+              ) : (
+                friendUsernames.map((friend, idx) => (
+                  <div key={idx} className="flex items-center text-sm text-zinc-300">
+                    <span className="text-blue-400 mr-2">@</span>{friend}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          {/* App Preferences */}
+          <section className="space-y-4">
+            <h3 className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase border-b border-zinc-900 pb-2">Preferences</h3>
+            <div className="flex justify-between items-center bg-zinc-900/40 border border-zinc-800/50 rounded-xl p-4">
+              <div>
+                <p className="text-sm text-zinc-300">Daily Reminder</p>
+                <p className="text-[10px] text-zinc-500 mt-1">Get notified when the new verse drops.</p>
+              </div>
+              <button onClick={toggleReminder} className={`w-12 h-6 rounded-full transition-colors relative ${reminderEnabled ? 'bg-blue-600' : 'bg-zinc-700'}`}>
+                <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${reminderEnabled ? 'translate-x-6' : ''}`} />
+              </button>
+            </div>
+          </section>
+
+          {/* Danger Zone */}
+          <section className="pt-8 text-center">
+             <button onClick={handleLogout} className="text-xs font-bold uppercase tracking-widest text-zinc-600 hover:text-red-500 transition-colors">Sign Out</button>
+          </section>
+        </div>
+      </main>
+    )
+  }
+
+  // --- UI: HOME FEED ---
   if (!devotional) return <div className="bg-[#050505] min-h-[100dvh]" />
 
   return (
     <main className="relative flex min-h-[100dvh] flex-col items-center bg-[#050505] px-6 py-12 text-white overflow-x-hidden font-sans pb-40">
-      <div className="absolute top-6 right-6 z-20 flex space-x-4 items-center">
-        {userProfile && (
-          <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest flex items-center space-x-1">
-            <span>@{userProfile.username}</span>
-            {/* Show personal streak in top nav */}
-            {userProfile.streak_count > 0 && <span className="text-orange-500">🔥{userProfile.streak_count}</span>}
+      
+      {/* Top Nav */}
+      <div className="absolute top-6 right-6 z-20">
+        <button onClick={() => setCurrentView('profile')} className="flex items-center space-x-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 rounded-full transition-colors shadow-lg">
+          <span className="text-[10px] text-zinc-300 font-bold uppercase tracking-widest">
+            {userProfile?.username || 'Profile'}
           </span>
-        )}
-        <button onClick={handleLogout} className="text-[10px] uppercase tracking-widest text-zinc-600 hover:text-red-400 transition-colors">Sign Out</button>
+          {userProfile?.streak_count > 0 && <span className="text-[10px] text-orange-500">🔥{userProfile.streak_count}</span>}
+        </button>
       </div>
 
       <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-blue-600/20 blur-[100px]" />
@@ -259,18 +372,12 @@ export default function Home() {
           <p className="text-sm leading-relaxed text-zinc-400 font-light italic">{devotional.reflection_prompt}</p>
         </div>
 
+        {/* FEED & TABS SECTION (Cleaned up!) */}
         <div className="w-full text-left space-y-6 pt-4 border-t border-zinc-900">
           <div className="flex bg-zinc-900/50 p-1 rounded-lg border border-zinc-800">
             <button onClick={() => setActiveTab('community')} className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition-all ${activeTab === 'community' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}>Community</button>
             <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition-all ${activeTab === 'friends' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}>Friends</button>
           </div>
-
-          {activeTab === 'friends' && (
-            <form onSubmit={handleAddFriend} className="flex space-x-2">
-              <input type="text" placeholder="Enter a username to add..." value={newFriendName} onChange={(e) => setNewFriendName(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
-              <button type="submit" disabled={isAddingFriend} className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors disabled:opacity-50">{isAddingFriend ? '...' : 'Add'}</button>
-            </form>
-          )}
 
           <div className="space-y-4">
             {displayedReflections.length === 0 ? (
@@ -278,13 +385,12 @@ export default function Home() {
             ) : (
               displayedReflections.map((ref) => {
                 const isLiked = likedItems.has(ref.id)
-                const userStreak = streaks[ref.user_name] || 0 // Get streak for this comment
+                const userStreak = streaks[ref.user_name] || 0
                 return (
                   <div key={ref.id} className="bg-zinc-900/40 p-4 rounded-xl border border-zinc-800/50">
                     <div className="flex justify-between items-start mb-2">
                       <p className="text-xs font-bold text-blue-400 flex items-center space-x-1">
                         <span>{ref.user_name}</span>
-                        {/* THE FEED STREAK */}
                         {userStreak > 0 && <span className="text-[10px] text-orange-500 ml-1">🔥{userStreak}</span>}
                       </p>
                       <p className="text-[10px] text-zinc-500">{new Date(ref.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
