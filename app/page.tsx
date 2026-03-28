@@ -39,7 +39,7 @@ export default function Home() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) {
-        setEditEmail(session.user.email)
+        setEditEmail(session.user.email || '')
         fetchUserProfile(session.user.id)
       }
     })
@@ -47,7 +47,7 @@ export default function Home() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
-        setEditEmail(session.user.email)
+        setEditEmail(session.user.email || '')
         fetchUserProfile(session.user.id)
       }
     })
