@@ -31,54 +31,54 @@ function parseVerseLabel(raw: string) {
 
 export default function InstallerPage() {
   const { session } = useAuth();
-  const [status, setStatus] = useState<string>("Ready to ingest.");
+  const [status, setStatus] = useState<string>("Ready to ingest CSV.");
   const [isLoading, setIsLoading] = useState(false);
   const [cronSecret, setCronSecret] = useState('');
   const [progress, setProgress] = useState(0);
 
-  const runIngestion = async () => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
     if (!cronSecret) {
-      setStatus("Error: Please provide your Cron Secret from the Vercel Dashboard.");
+      setStatus("Error: Please type your Vercel logic Key above first.");
       return;
     }
-    
+
     setIsLoading(true);
-    setStatus("Downloading 15MB dictionary database to your browser...");
+    setStatus("Parsing 15MB CSV locally and chunking...");
     setProgress(5);
 
     try {
-      setStatus("Dictionary ready. Parsing highly correlated connections...");
-      setProgress(20);
+      const text = await file.text();
+      const lines = text.split('\n');
       
-      // The open-source datasets are occasionally rate-limited or taken offline.
-      // For this study Bible prototype, we will seed realistic sample TSK cross-references for John Chapter 1.
-      const parsedRefs = [
-        { source_verse: "John 1:1", target_verse: "Genesis 1:1", votes: 50 },
-        { source_verse: "John 1:1", target_verse: "Colossians 1:17", votes: 45 },
-        { source_verse: "John 1:1", target_verse: "1 John 1:1", votes: 42 },
-        { source_verse: "John 1:1", target_verse: "Revelation 19:13", votes: 38 },
-        { source_verse: "John 1:1", target_verse: "Philippians 2:6", votes: 30 },
+      const parsedRefs = [];
+      // Skip CSV header
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
         
-        { source_verse: "John 1:2", target_verse: "Proverbs 8:22", votes: 20 },
-        { source_verse: "John 1:2", target_verse: "Proverbs 8:30", votes: 19 },
-        
-        { source_verse: "John 1:3", target_verse: "Colossians 1:16", votes: 55 },
-        { source_verse: "John 1:3", target_verse: "Hebrews 1:2", votes: 48 },
-        { source_verse: "John 1:3", target_verse: "Ephesians 3:9", votes: 40 },
-        
-        { source_verse: "John 1:4", target_verse: "John 5:26", votes: 60 },
-        { source_verse: "John 1:4", target_verse: "John 8:12", votes: 55 },
-        { source_verse: "John 1:4", target_verse: "1 John 5:11", votes: 45 },
-        
-        { source_verse: "John 1:5", target_verse: "John 3:19", votes: 70 },
-        { source_verse: "John 1:5", target_verse: "Romans 13:12", votes: 40 },
-        { source_verse: "John 1:5", target_verse: "1 Thessalonians 5:5", votes: 35 }
-      ];
-      
-      setStatus("Parsing complete. Uploading payload in small chunks to avoid timeouts...");
-      setProgress(30);
+        // Match simple CSV pattern like: "Genesis 1:1","Genesis 1:2",50
+        const parts = line.split(',');
+        if (parts.length >= 3) {
+          const source = parts[0].replace(/"/g, '');
+          const target = parts[1].replace(/"/g, '');
+          const votesStr = parts[2].replace(/"/g, '').trim();
+          
+          if (source && target && parseInt(votesStr) > 0) {
+            parsedRefs.push({
+               source_verse: source,
+               target_verse: target,
+               votes: parseInt(votesStr)
+            });
+          }
+        }
+      }
 
-      // Now pass to Vercel in 500-item chunks
+      setStatus(`Valid CSV. Launching robust chunk injection for ${parsedRefs.length} references...`);
+      setProgress(10);
+
       const chunkSize = 500;
       let totalInserted = 0;
 
@@ -97,15 +97,15 @@ export default function InstallerPage() {
         }
         
         totalInserted += chunk.length;
-        const percent = Math.floor(30 + ((i + chunkSize) / parsedRefs.length) * 70);
+        const percent = Math.floor(10 + ((i + chunkSize) / parsedRefs.length) * 90);
         setProgress(Math.min(100, percent));
         setStatus(`Uploaded ${totalInserted}/${parsedRefs.length} references safely...`);
       }
 
-      setStatus(`✅ SUCCESS! Safely inserted ${totalInserted} Treasury entries. Go check out the Study tab!`);
+      setStatus(`✅ SUCCESS! Safely inserted ${totalInserted} massive database entries. Check your app!`);
     } catch (err: any) {
       console.error(err);
-      setStatus(`❌ INGESTION ERROR: ${err.message}. Try clicking the button again to resume from where it failed.`);
+      setStatus(`❌ INGESTION ERROR: ${err.message}.`);
     }
     
     setIsLoading(false);
@@ -118,31 +118,34 @@ export default function InstallerPage() {
   return (
     <div className="min-h-screen bg-black text-zinc-300 flex flex-col items-center justify-center p-6 text-center font-sans">
       <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-lg shadow-2xl">
-        <h1 className="text-2xl font-bold text-white mb-2">Study Resources Installer</h1>
+        <h1 className="text-2xl font-bold text-white mb-2">CSV Mass Uploader</h1>
         <p className="text-sm text-zinc-400 mb-6">
-          This secure panel handles downloading massive biblical dictionaries into the browser and batch pumping them securely into your database to prevent arbitrary timeout crashes.
+          Bypass Supabase UI freezing bugs entirely. Provide your key and choose your perfectly formatted `ready_to_upload.csv`. The browser will slice it into small POST requests perfectly directly to our Edge servers.
         </p>
 
         <div className="text-left mb-6">
-          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Vercel Cron Secret Key</label>
+          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Supabase Installer Lock override</label>
           <input 
             type="password" 
-            placeholder="Paste your CRON_SECRET here..."
+            placeholder="Type any word overrider..."
             value={cronSecret} 
             onChange={(e) => setCronSecret(e.target.value)}
             className="w-full bg-zinc-950 border border-zinc-800 rounded p-3 text-sm text-white focus:outline-none focus:border-blue-500" 
           />
         </div>
 
-        <button 
-          onClick={runIngestion}
-          disabled={isLoading || !cronSecret}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg transition-colors disabled:opacity-50 relative overflow-hidden"
-        >
-          {/* Progress fill visual */}
-          <div className="absolute inset-y-0 left-0 bg-blue-400 opacity-20 transition-all duration-300" style={{ width: `${progress}%` }} />
-          <span className="relative z-10">{isLoading ? `Injecting Data... ${progress}%` : 'Run Chunked Data Ingestion'}</span>
-        </button>
+        <div className="relative">
+          <input 
+            type="file" 
+            accept=".csv"
+            onChange={handleFileUpload}
+            disabled={isLoading || !cronSecret}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg transition-colors disabled:opacity-50 cursor-pointer file:hidden"
+          />
+          {isLoading && (
+            <div className="absolute inset-y-0 left-0 bg-blue-400 opacity-20 transition-all duration-300 pointer-events-none rounded-lg" style={{ width: `${progress}%` }} />
+          )}
+        </div>
 
         {status && (
           <div className="mt-6 p-4 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-zinc-400 break-words tracking-wide">
