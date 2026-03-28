@@ -81,22 +81,43 @@ export default function Home() {
   // --- SETTINGS LOGIC ---
   async function handleUpdateProfile(e: React.FormEvent) {
     e.preventDefault()
+    
+    // 1. Sanitize & Validate Username
+    const safeUsername = editUsername.trim()
+    
+    // Reject empty or wildly long usernames
+    if (!safeUsername || safeUsername.length < 3 || safeUsername.length > 20) {
+      alert("Username must be between 3 and 20 characters.")
+      return
+    }
+
+    // Regex Check: Only allow letters, numbers, and underscores (No weird symbols)
+    if (!/^[a-zA-Z0-9_]+$/.test(safeUsername)) {
+      alert("Username can only contain letters, numbers, and underscores.")
+      return
+    }
+
     setIsUpdatingProfile(true)
 
-    // Update Username
-    if (editUsername !== userProfile.username) {
-      const { error } = await supabase.from('profiles').update({ username: editUsername }).eq('id', session.user.id)
+    if (safeUsername !== userProfile.username) {
+      const { error } = await supabase.from('profiles').update({ username: safeUsername }).eq('id', session.user.id)
       if (!error) {
-        setUserProfile({ ...userProfile, username: editUsername })
+        setUserProfile({ ...userProfile, username: safeUsername })
         alert("Username updated!")
       } else {
-        alert("That username might be taken.")
+        alert("That username might be taken or invalid.")
       }
     }
 
-    // Update Email
     if (editEmail !== session.user.email) {
-      const { error } = await supabase.auth.updateUser({ email: editEmail })
+      // 2. Sanitize & Validate Email
+      const safeEmail = editEmail.trim()
+      if (!/^\S+@\S+\.\S+$/.test(safeEmail)) {
+        alert("Please enter a valid email address.")
+        setIsUpdatingProfile(false)
+        return
+      }
+      const { error } = await supabase.auth.updateUser({ email: safeEmail })
       if (!error) alert("Email update link sent! Please check your new email's inbox.")
       else alert(error.message)
     }
@@ -205,7 +226,20 @@ export default function Home() {
 
   async function submitReflection(e: React.FormEvent) {
     e.preventDefault()
-    if (!comment || !devotional || !userProfile) return
+    
+    // 1. Sanitize the Input (strip trailing whitespace)
+    const sanitizedComment = comment.trim()
+
+    // 2. Strict Length Validation
+    if (!sanitizedComment) return
+    if (sanitizedComment.length > 500) {
+      alert("Reflection must be under 500 characters.")
+      return
+    }
+
+    // 3. Client-Side Throttle (Prevents double-clicking the submit button)
+    if (isSubmitting || !devotional || !userProfile) return
+    
     setIsSubmitting(true)
 
     const todayStr = new Date().toISOString().split('T')[0]
@@ -226,7 +260,7 @@ export default function Home() {
     const { error } = await supabase.from('reflections').insert({
       devotional_date: devotional.publish_date,
       user_name: userProfile.username,
-      content: comment,
+      content: sanitizedComment, // Use the sanitized version!
       parent_id: replyTo ? replyTo.id : null
     })
 
@@ -234,8 +268,15 @@ export default function Home() {
       setComment('')
       setReplyTo(null)
       fetchData()
+    } else {
+      console.error("Submission blocked:", error.message)
+      alert("Failed to post. Ensure you are logged in.")
     }
-    setIsSubmitting(false)
+    
+    // Add a slight artificial delay to prevent rapid-fire posting
+    setTimeout(() => {
+      setIsSubmitting(false)
+    }, 1000)
   }
 
   const topLevelReflections = reflections.filter(r => !r.parent_id)
