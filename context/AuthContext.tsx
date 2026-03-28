@@ -30,31 +30,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   async function fetchUserProfile(userId: string) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (profile) {
-      setUserProfile(profile);
-    }
-
-    const { data: friendships } = await supabase
-      .from('friendships')
-      .select('friend_id')
-      .eq('user_id', userId);
-
-    if (friendships && friendships.length > 0) {
-      const friendIds = friendships.map(f => f.friend_id);
-      const { data: friendProfiles } = await supabase
+    try {
+      const { data: profile } = await supabase
         .from('profiles')
-        .select('username')
-        .in('id', friendIds);
-      
-      if (friendProfiles) {
-        setFriendUsernames(friendProfiles.map(p => p.username));
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (profile) {
+        setUserProfile(profile);
       }
+
+      const { data: friendships } = await supabase
+        .from('friendships')
+        .select('friend_id')
+        .eq('user_id', userId);
+
+      if (friendships && friendships.length > 0) {
+        const friendIds = friendships.map(f => f.friend_id);
+        const { data: friendProfiles } = await supabase
+          .from('profiles')
+          .select('username')
+          .in('id', friendIds);
+        
+        if (friendProfiles) {
+          setFriendUsernames(friendProfiles.map(p => p.username));
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching user profile:", err);
+    } finally {
+      setIsLoading(false);
     }
   }
 
