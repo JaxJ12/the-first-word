@@ -1,8 +1,12 @@
+import React from "react";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import BottomNav from "@/components/BottomNav";
+import DevotionalLockGate from "@/components/DevotionalLockGate";
+
+export const dynamic = 'force-dynamic';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,6 +35,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-[#050505] text-white">
         <AuthProvider>
+          <React.Suspense fallback={null}>
+            <DevotionalLockGate />
+          </React.Suspense>
           {children}
           <BottomNav />
         </AuthProvider>

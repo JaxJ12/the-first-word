@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 
+export const dynamic = 'force-dynamic';
+
 const BOOK_MAP: Record<string, string> = {
   'Gen': 'Genesis', 'Exod': 'Exodus', 'Lev': 'Leviticus', 'Num': 'Numbers', 'Deut': 'Deuteronomy',
   'Josh': 'Joshua', 'Judg': 'Judges', 'Ruth': 'Ruth', '1Sam': '1 Samuel', '2Sam': '2 Samuel',
